@@ -9,7 +9,7 @@ const pageDefinitions = {
     title: 'All Leads',
     subtitle: 'A comprehensive list of all leads in the system',
     datasetId: 'relata_schema',
-    tableId: 'vsg_attendee',
+    tableId: 'activity',
     savedFilters: [
       {
         identifier: 'high_priority_leads',
