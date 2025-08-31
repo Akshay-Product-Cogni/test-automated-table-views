@@ -1,0 +1,110 @@
+Automating pages to View Data
+
+How will it work? the frontend will have drop down selector to simulate page selection
+  ⁠Fontend will pass the page name/identifier to the unified backend API to get data
+  ⁠Backend api will get table, saved filters with names, and actions config from the page name/identifier
+  Backend api will use schema data to identify column names to send
+    ⁠column names will be checked against a global or company level list of “column names <> readable names”
+    if not there in the lists, make readable names by replacing “_” with “ “ and converting the name to camel case
+  Backend API will setup filter configuration for each column based on some rules detailed in the next section
+  Backend API will send the data with table headings, filter configurations, saved filters, and actions configurations to show on the frontend
+  Frontend will show saved filters in tabs on the page
+    by default open All tab that shows all data with no filters applied
+    Other tabs are recently opened saved filters in some order (fixed or otherwise)
+    Show max tabs as possible in the screen width and then show “more” icon on clicking which it should show list of all saved filters for the selected page.
+    With this there are two levels of filter selection, one selection set up by a saved filter called “saved selection” and the other set up by the user called “user selection”
+  Frontend will setup filters as per filter config.
+    When user selects a tab (saved filter) then the filters applied by the saved filters get added to any existing User Selection of filters
+    Clearing filter selection in a tab will only clear the User Selections of filter. On further clearing user can be taken to the All tab clearing Saved selection from filters.
+    Saved selection should show up differently than the User selections in the filter panel
+    When changing tab only User selections in filters get carried forward to the next tab
+  Frontend will call the backend API with applied filters when user applies the filter or changes tabs to get updated data
+  Frontend will show buttons for each action configured for this page against each row (PHASE 2)
+  Frontend will handle pagination and request pages as needed. It will also preload upcoming pages in the background
+  Frontend will let users save current filtered view only if current filter has user selections and not just saved selections (PHASE 2)
+
+Setting up a page in backend (PHASE 2, hardcoded in MVP)
+  For new data to view in frontend we need to:
+    Setup a virtual or materialized view in redshift/bogquery
+    Setup a page definition in the backend to use the view. A page can be setup in backend with the following info:
+      page name
+      page subtitle
+      path-name
+      redshift/bigquery table path (show dropdown for all tables in redshift / bigquery schema)
+      Category (optional) (PHASE 2)
+      array of actions (optional) (PHASE 2)
+        button text shown in button or in tooltip
+        button icon
+        Button type ‘icon’ or ‘icon text’
+        Action to call eg function showLeadDetails that shows lead details popup or page for a given leadID
+        Column name (only one) to pass as parameter to the action eg column leadID (can show dropdown from selected tables)
+    Frontend will look at pages added to show list of pages in management console in Reports section
+
+Filters Interface on frontend
+  On frontend filters panel show up as a list of columns of the view table, each column with its “Options” as forwarded in filter config, shown as chips. 
+  Some filters will have limited number of Options to show in chips, some will have many. In the filter panel, only a limited number of chips can be shown, lets call these quick-filters. These let user view a filtered data without going through all filter options. The number of options shown for each column can be limited to max 10, based on how many number of chips can be contained within two rows on the panel. 
+  
+  Each chip will attempt to show the full text of the option upto 16 characters, the truncated text can be viewed on hover in the tooltip.
+  If options are more than the limits, there will be an additional chip “more” that on-click shows a popover to let user select values for filter.
+  
+  The popover contents are specific to filter types. Based on the filter types fields in popover will be populated.
+    Filter Type: DATE :
+      Dropdown to select “between”, “before”, “after”, “previous”, “next”, etc modalities
+      One date range selection field or one date selection field or a number input field + dropdown selection between “days”, “weeks”, “months” as appropriate for the selected modalities
+    Filter Type: FREETEXT (String type with more than 20 distinct options):
+      Dropdown to select “exact”, “contains”, “starts with” modalities out of which “contains” is selected by default
+      Text input field
+    Filter Type: LIST (String type with less than 20 distinct options):
+      combo box that lists and lets user search across the 20 options to make selection
+    Filter Type: NUMERIC:
+      Dropdown to select “between”, “equals”, “greater than”, “less than”, etc modalities
+      One or two number input fields
+    Filter Type: GEO (Geography type):
+      TBD
+    Filter Type: BOOLEAN will only have 2 options and hence will never need the popover
+  
+  When a filter selection is done it should show up as a chip on filter panel, resulting in a previously visible chip from under that column to be hidden when the selection is not from the quick filters such that the total visible chips count stays 6 - 8 contained within two rows on the panel.
+  Chips showing Saved selections will be differently coloured than User selections in Filter panel
+    
+Column shortlists (PHASE 2):
+  These lists will help the system figure out if any columns have specific niche type that is needed, eg 
+    “future dates” for appointment moments for DATE or DATETIME column type or 
+    entity type (“prospect” / “staffer” / “company” / “agent”) for STRING or VARCHAR column type to format column or to let the filter know that it should let user search all possible values of that entity (wherever applicable)
+    “status” for STRING or VARCHAR column types to denote the column is status type of column to be treated differently in table and filter chips.
+    If a column needs a specific name instead of column name converted to Ceml case with spaces
+  
+  These will be used to determine options to be passed for the column but also will be passed as tags or labels OR be considered in filter types to let frontend have different behaviour (eg show chips with avatar for “prospect” / “staffer” / “company” / “agent” or show chums with succeed or destructive styling for “status” columns). We can also specify options that should be mandatorily available for that column in filter (eg the column is populated by an enum which originally had 4 possible values, but entries in a table have yet had only 3 of them, getting distinct out of that table will give us 3 values but in filter it should actually show all 4 of the enum values)
+  This can be a table with the following parameters:
+    Column-name
+    Display-name
+    Tag/type
+    Mandatory Options
+  
+  So if a column-name say “owner_company” across all views needs to show up in frontend as Company and should be styled as a company entity in columns and filters, it will have one entry in the above table 
+  “owner_company | Company | COMPANY”
+
+Filters config
+  Filters config as forwarded by the bankedn API will be an array of filters defined by:
+    Column name
+    Filter Type
+    Options
+    Tags (PHASE 2)
+  
+  Based on column types, we can define filter types and options, as per the following logic.
+    ⁠Column Type:  DATE or DATETIME, 
+      Send filter type as DATE
+      Check if max dates for the data of the column (to identify if the field is for future dates eg “appointment moment” or past dates eg “created on”) so that appropriate options from the following list can be sent. “last year”, “last six months”, “last quarter”, “last month”, “last week”, “this year”, “this quarter”, “this month”, “this week”, “last 7 days”, “last 30 days”, “yesterday”, “today”, “tommorow”, “next week”, “next month”, “next quarter”.
+    ⁠⁠Column Type:  VARCHAR or STRING, 
+      Check if distinct values for the column is under 20, then set filter type as LIST with all these distinct values as options, else set filter type as FREETEXT and send the top 10 (by frequency) distinct values as options
+    ⁠Column Type:  BOOLEAN
+      set filter type as BOOLEAN 
+      True and False as options
+    ⁠Column Type:  NUMERIC, 
+      set filter type as NUMERIC. 
+      Check max and min values for the column. And select appropriate options from the following list, “top 10%”, “bottom 10
+    ⁠Column Type:  GEOGRAPHY (PHASE 2)
+      Set filter type as GEO
+
+  Whenever optiions are not available for a column, send "Empty" or "Not Empty" as options.
+
+  (PHASE 2) Based on Column override table, we can update the filter types as well.

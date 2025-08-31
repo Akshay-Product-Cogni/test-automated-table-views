@@ -1,0 +1,319 @@
+# **Project Canvas: Automating Pages to View Data (Phase 1)**
+
+### **1. Objective & Vision**
+To build a Proof-of-Concept (POC) that automates the creation of data-viewing pages. The system will use a unified backend API to query BigQuery views, dynamically generate appropriate filters and headers, and render a complete, interactive data table on the frontend with minimal page-specific configuration.
+
+---
+
+### **2. Technology Stack**
+* **Backend**: NodeJS
+* **Frontend**: HTML, CSS, JavaScript (using the Bootstrap framework)
+* **Database**: Google BigQuery (specific integration details will be provided)
+
+---
+
+### **3. Scope (Phase 1)**
+This initial phase will focus on delivering the core functionality. The following features are in scope:
+* A frontend with a dropdown menu to select a page.
+* A single, unified backend API endpoint to serve all data and configurations. A sample response expected from API is in /sample_response.json
+* Hardcoded page definitions in the backend (see section 7 for the specific structure).
+* Automated generation of readable table headers from raw BigQuery column names.
+* Dynamic filter configuration based on the data type and content of each column.
+* A two-layer filtering system with pre-defined "saved filters" (rendered as tabs) and dynamic "user selections".
+* Logic to clear user selections independently of the saved filter's base selections.
+* Frontend-driven pagination to handle large datasets.
+
+---
+
+### **4. User Stories**
+This section outlines the key workflows from the perspective of an end-user, such as a Business Analyst.
+
+* **Viewing a Report**: As a Business Analyst, I want to select a report from a dropdown list, so that I can easily access different datasets without needing technical assistance.
+* **Using Saved Filters**: As a Business Analyst, I want to click on a saved filter tab (e.g., "High Priority Leads"), so that I can quickly view a standard, pre-configured subset of the data.
+* **Applying Quick Filters**: As a Business Analyst, I want to click on a filter chip (e.g., "Status: New"), so that I can instantly refine the data based on a common value.
+* **Applying Advanced Filters**: As a Business Analyst, I want to use the "more" button in the filter panel, so that I can apply complex filters, such as selecting a specific date range for a report.
+* **Combining Filters**: As a Business Analyst, I want to apply my own custom filters on top of a saved filter, so that I can further narrow down a standard report for my specific analytical needs.
+* **Clearing Filters**: As a Business Analyst, I want a way to clear only my custom-applied filters, so that I can easily explore different scenarios from the baseline of a saved filter.
+* **Navigating Data**: As a Business Analyst, I want to use pagination controls (e.g., "Next," "Previous"), so that I can work with large reports without performance issues.
+
+---
+
+### **5. Frontend Canvas**
+
+#### **5.1. Page Element Hierarchy**
+* **`AppContainer`**
+    * `PageSelector`: A dropdown to select the data page.
+    * `PageContainer`
+        * **`SavedFilterTabs`**: A series of tabs representing saved filters. An "All" tab is shown by default. Display as many tabs as fit within the available width; overflow tabs are consolidated under a "More" menu that lists all saved filters. Selecting a saved filter applies its base selections in addition to any existing user selections. When switching tabs, only user selections carry forward to the next tab. Clearing filters once clears only user selections; clearing again returns to the "All" tab (removing saved selections). Switching tabs triggers an API refetch.
+        * **`FilterPanel`**: A container showing a list of filters for the table's columns.always visible on right side of the screen
+            * `FilterGroup` (per column):
+                * `FilterChips`: Clickable "quick-filters". Saved selection chips are styled differently from user selection chips. Populated from options sent by API. When no options are available, the backend will include "Empty" or "Not Empty" options.
+                * `MoreButton`: A chip that opens a popover for advanced filtering.
+                    * **`FilterPopover`**: A modal whose content is determined by the `filterType`.
+        * **`DataTable`**: Renders the data with headers and pagination controls.
+
+#### **5.2. Filter Popover Logic**
+The fields displayed in the `FilterPopover` depend on the `filterType` sent by the backend:
+
+* **`filterType: DATE`**: A dropdown for modalities ("between", "after", etc.) and corresponding inputs (date range, single date picker).
+* **`filterType: FREETEXT`**: A dropdown for modalities ("contains", "exact", etc.) and a text input field.
+* **`filterType: LIST`**: A searchable combo box to select from the list of options.
+* **`filterType: NUMERIC`**: A dropdown for modalities ("between", "equals", etc.) and one or two number input fields.
+* **`filterType: BOOLEAN`**: This type will not require a popover.
+
+---
+
+### **6. Backend Canvas**
+
+#### **6.1. Function Definitions**
+* **`getPageData(...)`**: The main controller that handles API requests.
+* **`getPageConfiguration(pageIdentifier)`**: Retrieves a page's hardcoded configuration.
+* **`generateFilterConfig(viewPath)`**: Analyzes a BigQuery view to produce the `filterConfig` array.
+* **`buildBigQueryQuery(...)`**: Constructs the final SQL query with dynamic `WHERE`, `LIMIT`, and `OFFSET` clauses.
+* **`formatTableHeaders(columnNames)`**: Converts raw column names to user-friendly display names.
+
+#### **6.2. Detailed Filter Generation Logic**
+* **For `DATE` or `DATETIME`**: Sets `filterType` to `DATE` and generates options like "last 7 days".
+* **For `VARCHAR` or `STRING`**: Checks the distinct value count. If < 20, sets `filterType` to `LIST`. Otherwise, sets `filterType` to `FREETEXT` and provides the top 10 most frequent values as quick-filter options.
+* **For `BOOLEAN`**: Sets `filterType` to `BOOLEAN` with `[True, False]` as options.
+* **For `NUMERIC`**: Sets `filterType` to `NUMERIC` with options like "top 10%".
+
+---
+
+### **7. Hardcoded Page Definitions**:
+For the MVP, the page configurations will be hardcoded in a configuration file in the NestJS backend. Use the JavaScript object structure provided below. You will need to replace the placeholder `bigQueryPath` values with your actual BigQuery view paths.
+    
+* **Page Definitions**:
+    ```json
+    {
+        "leads_view": {
+            "pageIdentifier": "leads_view",
+            "title": "All Leads",
+            "subtitle": "A comprehensive list of all leads in the system",
+            "bigQueryPath": "YOUR_PROJECT.YOUR_DATASET.YOUR_LEADS_VIEW",
+            "savedFilters": [
+            {
+                "identifier": "high_priority_leads",
+                "displayName": "High Priority",
+                "filterDefinition": {
+                "priority": {
+                    "type": "LIST",
+                    "values": ["High", "Urgent"],
+                },
+                },
+            },
+            ],
+        },
+        "sales_report": {
+            "pageIdentifier": "sales_report",
+            "title": "Sales Report",
+            "subtitle": "Weekly sales performance metrics",
+            "bigQueryPath": "YOUR_PROJECT.YOUR_DATASET.YOUR_SALES_VIEW",
+            "savedFilters": [
+            {
+                "identifier": "top_performers",
+                "displayName": "Top Performers",
+                "filterDefinition": {
+                "sales_amount": {
+                    "type": "NUMERIC",
+                    "modality": "greater than",
+                    "values": [10000],
+                },
+                },
+            }],
+        },
+    };
+    ```
+
+---
+
+### **8. API & Data Flow**
+
+#### **8.1. API Endpoint: `POST /api/page-data`**
+
+* **Request Body**:
+    ```json
+    {
+      "pageIdentifier": "string",
+      "savedFilterIdentifier": "string | null",
+      "userFilters": { /* ... */ },
+      "pagination": { "page": 1, "pageSize": 50 }
+    }
+    ```
+* **Success Response (200 OK)**:
+    ```json
+    {
+      "pageDetails": { "title": "string", "subtitle": "string" },
+      "tableHeaders": [ { "key": "col1", "displayName": "Column 1" } ],
+      "data": [ { "col1": "value" } ],
+      "filterConfig": [ { "columnName": "col1", "filterType": "LIST", "options": [] } ],
+      "savedFilters": [ { "identifier": "sf1", "displayName": "Saved Filter 1" } ],
+      "pagination": { /* ... */ }
+    }
+    ```
+* **Sample Response**:
+    ```json
+    {
+        "pageDetails": {
+        "title": "All Leads",
+        "subtitle": "A comprehensive list of all leads in the system"
+        },
+        "tableHeaders": [
+        { "key": "lead_name", "displayName": "Lead Name" },
+        { "key": "company_name", "displayName": "Company Name" },
+        { "key": "status", "displayName": "Status" },
+        { "key": "priority", "displayName": "Priority" },
+        { "key": "deal_value", "displayName": "Deal Value" },
+        { "key": "lead_source", "displayName": "Lead Source" },
+        { "key": "created_at", "displayName": "Created At" },
+        { "key": "follow_up_date", "displayName": "Follow-up Date" },
+        { "key": "is_contacted", "displayName": "Contacted" },
+        { "key": "owner_id", "displayName": "Owner ID" },
+        { "key": "employee_count", "displayName": "Employee Count" },
+        { "key": "notes", "displayName": "Notes" }
+        ],
+        "data": [
+        {
+            "lead_name": "John Smith",
+            "company_name": "Innovate Inc.",
+            "status": "New",
+            "priority": "High",
+            "deal_value": 50000,
+            "lead_source": "Webinar",
+            "created_at": "2025-08-27T10:00:00Z",
+            "follow_up_date": "2025-09-05T10:00:00Z",
+            "is_contacted": false,
+            "owner_id": "user_101",
+            "employee_count": 250,
+            "notes": "Interested in Enterprise plan. Follow up next week."
+        },
+        {
+            "lead_name": "Maria Garcia",
+            "company_name": "Solutions Co.",
+            "status": "Contacted",
+            "priority": "Medium",
+            "deal_value": 25000,
+            "lead_source": "Referral",
+            "created_at": "2025-08-25T14:30:00Z",
+            "follow_up_date": "2025-09-02T10:00:00Z",
+            "is_contacted": true,
+            "owner_id": "user_102",
+            "employee_count": 75,
+            "notes": "Sent initial proposal. Awaiting feedback."
+        },
+        {
+            "lead_name": "Chen Wei",
+            "company_name": "Tech Forward",
+            "status": "Qualified",
+            "priority": "High",
+            "deal_value": 75000,
+            "lead_source": "Conference",
+            "created_at": "2025-08-20T09:00:00Z",
+            "follow_up_date": "2025-09-01T10:00:00Z",
+            "is_contacted": true,
+            "owner_id": "user_101",
+            "employee_count": 500,
+            "notes": "Demo scheduled for Monday."
+        },
+        {
+            "lead_name": "Fatima Al-Sayed",
+            "company_name": "Global Connect",
+            "status": "New",
+            "priority": "Low",
+            "deal_value": 10000,
+            "lead_source": "Webinar",
+            "created_at": "2025-08-30T11:00:00Z",
+            "follow_up_date": null,
+            "is_contacted": false,
+            "owner_id": "user_103",
+            "employee_count": 120,
+            "notes": "Downloaded whitepaper on AI integration."
+        }
+        ],
+        "filterConfig": [
+        {
+            "columnName": "lead_name",
+            "filterType": "FREETEXT",
+            "options": ["John Smith", "Maria Garcia", "Chen Wei", "Fatima Al-Sayed"]
+        },
+        {
+            "columnName": "company_name",
+            "filterType": "FREETEXT",
+            "options": ["Innovate Inc.", "Solutions Co.", "Tech Forward", "Global Connect"]
+        },
+        {
+            "columnName": "status",
+            "filterType": "LIST",
+            "options": ["New", "Contacted", "Qualified", "Lost", "Unqualified"]
+        },
+        {
+            "columnName": "priority",
+            "filterType": "LIST",
+            "options": ["Low", "Medium", "High", "Urgent"]
+        },
+        {
+            "columnName": "deal_value",
+            "filterType": "NUMERIC",
+            "options": ["top 10%", "bottom 10%"]
+        },
+        {
+            "columnName": "lead_source",
+            "filterType": "LIST",
+            "options": ["Webinar", "Referral", "Conference", "Cold Call"]
+        },
+        {
+            "columnName": "created_at",
+            "filterType": "DATE",
+            "options": ["today", "yesterday", "last 7 days", "this month", "last month"]
+        },
+        {
+            "columnName": "follow_up_date",
+            "filterType": "DATE",
+            "options": ["today", "tomorrow", "next 7 days", "this month", "next month"]
+        },
+        {
+            "columnName": "is_contacted",
+            "filterType": "BOOLEAN",
+            "options": [true, false]
+        },
+        {
+            "columnName": "owner_id",
+            "filterType": "FREETEXT",
+            "options": ["user_101", "user_102", "user_103"]
+        },
+        {
+            "columnName": "employee_count",
+            "filterType": "NUMERIC",
+            "options": []
+        },
+        {
+            "columnName": "notes",
+            "filterType": "FREETEXT",
+            "options": []
+        }
+        ],
+        "savedFilters": [
+        {
+            "identifier": "high_priority_leads",
+            "displayName": "High Priority"
+        },
+        {
+            "identifier": "recent_leads",
+            "displayName": "Added This Month"
+        }
+        ],
+        "pagination": {
+        "currentPage": 1,
+        "pageSize": 50,
+        "totalRecords": 1250,
+        "totalPages": 25
+        }
+    }
+    ```
+
+#### **8.2. End-to-End Data Flow**
+1.  **Initial Load**: The user selects a page, and the frontend calls the API.
+2.  **Backend Processing**: The backend gets the page configuration, generates filter configs, fetches the first page of data, and returns the full payload.
+3.  **Frontend Render**: The frontend renders the entire page, including tabs, filters, and the data table.
+4.  **User Interaction & Data Refresh**: When the user applies a filter or changes tabs, the frontend calls the API again with the updated context to get an updated data set.
+

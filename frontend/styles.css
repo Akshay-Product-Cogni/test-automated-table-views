@@ -1,0 +1,28 @@
+.sticky-top { top: 1rem; }
+
+/* Fixed table row height */
+table#dataTable tbody tr {
+  height: 50px; /* change to 30px if preferred */
+}
+
+/* Truncate cell text and fixed column widths */
+table#dataTable th,
+table#dataTable td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.col-w-120 { width: 120px; max-width: 120px; }
+.col-w-200 { width: 200px; max-width: 200px; }
+
+/* Loading state for filter chips */
+.chip-loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.chip-user { /* blue */ }
+.chip-saved { /* red */ }
+
+
