@@ -1,4 +1,11 @@
+// Frontend script for Automated Table Views (POC)
+// Responsibilities:
+// - Manage page selector, tabs, filter panel (chips + popover), table rendering, and pagination
+// - Maintain user filter state and combine it with saved filter context provided by the backend
+// - Provide minimal but responsive UX: loading indicators, chip toggles, deduplication of saved vs user chips
+
 document.addEventListener('DOMContentLoaded', () => {
+  // Core DOM references
   const pageSelector = document.getElementById('pageSelector');
   const savedFilterTabs = document.getElementById('savedFilterTabs');
   const tableHead = document.querySelector('#dataTable thead');
@@ -6,17 +13,23 @@ document.addEventListener('DOMContentLoaded', () => {
   const pagination = document.getElementById('pagination');
   const filterPanel = document.getElementById('filterPanel');
   const loadingIndicator = document.getElementById('loadingIndicator');
+
+  // Filter popover (Bootstrap modal) elements
   const filterPopoverModalEl = document.getElementById('filterPopoverModal');
   const filterPopoverForm = document.getElementById('filterPopoverForm');
   const filterPopoverTitle = document.getElementById('filterPopoverTitle');
   const filterPopoverApply = document.getElementById('filterPopoverApply');
   const filterPopoverModal = filterPopoverModalEl ? new bootstrap.Modal(filterPopoverModalEl) : null;
-  let popoverContext = null;
+  let popoverContext = null; // Which column/type popover is currently editing
 
-  let currentSavedFilter = null;
-  let userFilters = {};
+  // Page-local state
+  let currentSavedFilter = null; // Which tab is selected (savedFilterIdentifier)
+  let userFilters = {}; // Map columnName -> { type, modality?, values: [] }
   let paginationState = { page: 1, pageSize: 10 };
 
+  // Render saved-filter tabs
+  // - Default "All" tab shows no saved filter
+  // - Currently uses simple overflow logic (first 4 inline, rest under More)
   function renderTabs(savedFilters) {
     savedFilterTabs.innerHTML = '';
     const allTab = document.createElement('li');
@@ -65,11 +78,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Column width heuristic for table display
   function pickColumnWidthClass(key) {
     // Simple heuristic: longer keys get 200px, else 120px
     return key.length > 10 ? 'col-w-200' : 'col-w-120';
   }
 
+  // Render table headers and rows
   function renderTable(headers, data) {
     tableHead.innerHTML = '';
     tableBody.innerHTML = '';
@@ -97,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Render pagination controls (prev/info/next)
   function renderPagination(p) {
     pagination.innerHTML = '';
     const prev = document.createElement('li');
@@ -131,6 +147,9 @@ document.addEventListener('DOMContentLoaded', () => {
     pagination.appendChild(next);
   }
 
+  // Render filter panel: saved chips (red), quick chips, and user chips from popover
+  // - Deduplicates saved values from quick chips
+  // - Shows modality labels when not trivial (not 'exact'/'is')
   function renderFilters(filterConfig, headers) {
     filterPanel.innerHTML = '';
     const headerMap = new Map((headers || []).map((h) => [h.key, h.displayName]));
@@ -146,11 +165,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const chips = document.createElement('div');
       chips.className = 'd-flex flex-wrap gap-2';
 
-      // Build a set of saved values for this column to suppress duplicates in quick/user chips
+      // Saved selections for this column
       const savedValuesSet = new Set();
       const titleCase = (s) => String(s || '').replace(/\b\w/g, (c) => c.toUpperCase());
-
-      // Saved filter chips (visual, non-interactive)
       if (savedDef[fc.columnName]) {
         const def = savedDef[fc.columnName];
         const values = Array.isArray(def.values) ? def.values : [];
@@ -158,7 +175,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const modalityStr = Array.isArray(modalityRaw) ? String(modalityRaw[0]) : String(modalityRaw || '');
         const modalityLower = modalityStr.toLowerCase();
         const showMod = modalityStr && !['exact', 'is'].includes(modalityLower);
-        // Add value chips (e.g., LIST saved values)
         values.forEach((v) => {
           savedValuesSet.add(String(v));
           const savedBtn = document.createElement('button');
@@ -168,7 +184,6 @@ document.addEventListener('DOMContentLoaded', () => {
           savedBtn.textContent = showMod ? `${titleCase(modalityStr)}: ${String(v)}` : String(v);
           chips.appendChild(savedBtn);
         });
-        // Add modality-only chip (e.g., Is Empty / Is Not Empty), but skip trivial 'is'/'exact'
         if (!values.length && modalityStr && !['exact', 'is'].includes(modalityLower)) {
           const savedBtn = document.createElement('button');
           savedBtn.type = 'button';
@@ -179,21 +194,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
+      // Quick chips for common options (skipping values already represented by saved chips)
       const current = userFilters[fc.columnName];
       const currentValues = current && Array.isArray(current.values) ? current.values : [];
       const isSelected = (val) => currentValues.some((v) => v === val);
       (fc.options || []).slice(0, 6).forEach((opt) => {
-        // Suppress duplicate quick chip if value already represented by a saved chip
-        if (savedValuesSet.has(String(opt))) return;
+        if (savedValuesSet.has(String(opt))) return; // avoid duplicates
         const btn = document.createElement('button');
         const selected = isSelected(opt);
         btn.className = `btn btn-sm ${selected ? 'btn-secondary active' : 'btn-outline-secondary'}`;
         btn.textContent = String(opt);
         btn.addEventListener('click', async () => {
+          // Toggle selected quick chip into userFilters and refetch
           btn.classList.add('chip-loading');
           const existing = userFilters[fc.columnName];
           const type = fc.filterType;
-          // Toggle behaviour
           if (type === 'FREETEXT') {
             if (existing && Array.isArray(existing.values) && existing.values[0] === opt) {
               delete userFilters[fc.columnName];
@@ -213,7 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chips.appendChild(btn);
       });
 
-      // Chips for popover-applied selections (including empty/not-empty modalities)
+      // User chips derived from popover (including modality-only, e.g., Is Empty)
       if (current) {
         const quick = new Set((fc.options || []).slice(0, 6).map(String));
         const modalityLower = (current.modality || '').toLowerCase();
@@ -230,8 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
           chips.appendChild(chip);
         }
         (current.values || []).forEach((v) => {
-          // Skip if already represented by saved selection or quick chip
-          if (savedValuesSet.has(String(v)) || quick.has(String(v))) return;
+          if (savedValuesSet.has(String(v)) || quick.has(String(v))) return; // avoid duplicates
           const chip = document.createElement('button');
           chip.className = 'btn btn-sm btn-secondary';
           const label = current.modality && !['exact', 'is'].includes(modalityLower) ? `${titleCase(current.modality)}: ${v}` : String(v);
@@ -248,7 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       group.appendChild(chips);
 
-      // More button for advanced filtering
+      // More button opens popover for advanced filtering
       const moreBtn = document.createElement('button');
       moreBtn.className = 'btn btn-sm btn-outline-primary mt-2';
       moreBtn.textContent = 'More';
@@ -263,6 +277,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Build the filter popover dynamically based on filterType
+  // - FREETEXT: modality (contains/exact/starts/empty) + text field when relevant
+  // - NUMERIC: modality (equals/between/gt/lt/empty) + one/two number fields
+  // - DATE: modality (on/between/before/after) + one or two date fields
+  // - LIST: modality (is/contains/exact/starts/empty) + select for is, text field for others
+  // - BOOLEAN: modality (is/empty) + dropdown for true/false
   function openFilterPopover(ctx) {
     if (!filterPopoverModal) return;
     popoverContext = ctx;
@@ -324,7 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const modality = document.createElement('select'); modality.setAttribute('data-role','modality'); modality.className = 'form-select mb-2';
       ['Is', 'Contains', 'Exact', 'Starts With', 'Is Empty', 'Is Not Empty'].forEach((m) => { const opt = document.createElement('option'); opt.value = m.toLowerCase(); opt.textContent = m; modality.appendChild(opt); });
       modality.value = existing.modality || 'is';
-      // Container to swap between select and input
+      // Swap between select (Is) and text input (other modalities)
       const valueContainer = document.createElement('div');
       const select = document.createElement('select'); select.setAttribute('data-role','valueSelect'); select.className = 'form-select';
       (ctx.options || []).forEach((o) => { const opt = document.createElement('option'); opt.value = String(o); opt.textContent = String(o); select.appendChild(opt); });
@@ -358,6 +378,7 @@ document.addEventListener('DOMContentLoaded', () => {
     filterPopoverModal.show();
   }
 
+  // Apply popover selections to userFilters and trigger refetch
   if (filterPopoverApply) {
     filterPopoverApply.addEventListener('click', async () => {
       if (!popoverContext) return;
@@ -393,8 +414,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Fetch latest page data from backend (applies savedFilter and userFilters)
   async function fetchAndRender(reason = 'unknown') {
-    // Loading state
+    // Loading UX around page selector
     console.log('[LOADING_START] disabling selector, showing spinner', { reason });
     pageSelector.disabled = true;
     if (loadingIndicator) loadingIndicator.style.visibility = 'visible';
@@ -413,7 +435,9 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       const data = await res.json();
       console.log('[FETCH_OK] /api/page-data', { reason, received: { headers: (data.tableHeaders||[]).length, rows: (data.data||[]).length } });
+      // Save applied saved filter for chip rendering
       window.__appliedSavedFilter = data.appliedSavedFilter || null;
+      // Render all UI regions
       renderTabs(data.savedFilters || []);
       renderFilters(data.filterConfig || [], data.tableHeaders || []);
       renderTable(data.tableHeaders || [], data.data || []);
@@ -427,6 +451,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Reset state when page changes; re-fetch
   pageSelector.addEventListener('change', () => {
     currentSavedFilter = null;
     userFilters = {};
@@ -435,6 +460,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchAndRender('page_selector_change');
   });
 
+  // Initial page load
   console.log('[TRIGGER] Initial load -> fetch start');
   fetchAndRender('initial_load');
 });
