@@ -34,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
     savedFilterTabs.innerHTML = '';
     const allTab = document.createElement('li');
     allTab.className = 'nav-item';
+    // __all__ denotes no saved filter applied
     allTab.innerHTML = `<button class="nav-link ${currentSavedFilter ? '' : 'active'}" data-id="__all__">All</button>`;
     savedFilterTabs.appendChild(allTab);
 
@@ -44,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     inline.forEach((sf) => {
       const li = document.createElement('li');
       li.className = 'nav-item';
+      // Mark active if the current saved filter matches tab id
       li.innerHTML = `<button class="nav-link ${currentSavedFilter === sf.identifier ? 'active' : ''}" data-id="${sf.identifier}">${sf.displayName}</button>`;
       savedFilterTabs.appendChild(li);
     });
@@ -51,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (overflow.length > 0) {
       const dropdown = document.createElement('li');
       dropdown.className = 'nav-item dropdown';
+      // Overflow under More menu
       dropdown.innerHTML = `
         <button class="nav-link dropdown-toggle" data-bs-toggle="dropdown">More</button>
         <ul class="dropdown-menu">
@@ -62,18 +65,19 @@ document.addEventListener('DOMContentLoaded', () => {
       dropdown.querySelectorAll('.dropdown-item').forEach((a) => {
         a.addEventListener('click', (e) => {
           e.preventDefault();
-          currentSavedFilter = a.getAttribute('data-id');
-          fetchAndRender();
+          currentSavedFilter = a.getAttribute('data-id'); // set tab id
+          fetchAndRender(); // refetch page data
         });
       });
     }
 
+    // Tab click listeners (including All)
     savedFilterTabs.querySelectorAll('button.nav-link').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = btn.getAttribute('data-id');
-        currentSavedFilter = id === '__all__' ? null : id;
+        currentSavedFilter = id === '__all__' ? null : id; // null means no saved filter
         console.log('[TRIGGER] Tabs click -> fetch start', { savedFilter: currentSavedFilter });
-        fetchAndRender('tabs_click');
+        fetchAndRender('tabs_click'); // refetch with new savedFilterIdentifier
       });
     });
   }
@@ -159,15 +163,16 @@ document.addEventListener('DOMContentLoaded', () => {
       group.className = 'mb-3';
       const title = document.createElement('div');
       title.className = 'fw-bold mb-1';
-      title.textContent = headerMap.get(fc.columnName) || fc.columnName;
+      title.textContent = headerMap.get(fc.columnName) || fc.columnName; // show display name
       group.appendChild(title);
 
       const chips = document.createElement('div');
       chips.className = 'd-flex flex-wrap gap-2';
 
-      // Saved selections for this column
+      // Saved values set used to suppress duplicate quick/user chips
       const savedValuesSet = new Set();
-      const titleCase = (s) => String(s || '').replace(/\b\w/g, (c) => c.toUpperCase());
+
+      // Render saved selection chips (red, disabled) for this column
       if (savedDef[fc.columnName]) {
         const def = savedDef[fc.columnName];
         const values = Array.isArray(def.values) ? def.values : [];
@@ -176,11 +181,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const modalityLower = modalityStr.toLowerCase();
         const showMod = modalityStr && !['exact', 'is'].includes(modalityLower);
         values.forEach((v) => {
-          savedValuesSet.add(String(v));
+          savedValuesSet.add(String(v)); // remember value to avoid duplicates later
           const savedBtn = document.createElement('button');
           savedBtn.type = 'button';
-          savedBtn.className = 'btn btn-sm btn-danger';
-          savedBtn.disabled = true;
+          savedBtn.className = 'btn btn-sm btn-danger'; // red styling for saved chips
+          savedBtn.disabled = true; // non-interactive
+          // Include modality in label when meaningful
           savedBtn.textContent = showMod ? `${titleCase(modalityStr)}: ${String(v)}` : String(v);
           chips.appendChild(savedBtn);
         });
@@ -194,26 +200,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      // Quick chips for common options (skipping values already represented by saved chips)
+      // Quick chips: first N options, clickable toggles
       const current = userFilters[fc.columnName];
       const currentValues = current && Array.isArray(current.values) ? current.values : [];
       const isSelected = (val) => currentValues.some((v) => v === val);
       (fc.options || []).slice(0, 6).forEach((opt) => {
-        if (savedValuesSet.has(String(opt))) return; // avoid duplicates
+        if (savedValuesSet.has(String(opt))) return; // don't double-render saved values
         const btn = document.createElement('button');
         const selected = isSelected(opt);
         btn.className = `btn btn-sm ${selected ? 'btn-secondary active' : 'btn-outline-secondary'}`;
         btn.textContent = String(opt);
         btn.addEventListener('click', async () => {
-          // Toggle selected quick chip into userFilters and refetch
-          btn.classList.add('chip-loading');
+          // Toggle selection in userFilters for this column
+          btn.classList.add('chip-loading'); // show loading style
           const existing = userFilters[fc.columnName];
           const type = fc.filterType;
           if (type === 'FREETEXT') {
             if (existing && Array.isArray(existing.values) && existing.values[0] === opt) {
-              delete userFilters[fc.columnName];
+              delete userFilters[fc.columnName]; // remove selection
             } else {
-              userFilters[fc.columnName] = { type, values: [opt] };
+              userFilters[fc.columnName] = { type, values: [opt] }; // set single value
             }
           } else {
             const values = existing && Array.isArray(existing.values) ? [...existing.values] : [];
@@ -228,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chips.appendChild(btn);
       });
 
-      // User chips derived from popover (including modality-only, e.g., Is Empty)
+      // User chips originating from popover (may include modality-only like "Is Empty")
       if (current) {
         const quick = new Set((fc.options || []).slice(0, 6).map(String));
         const modalityLower = (current.modality || '').toLowerCase();
@@ -239,13 +245,14 @@ document.addEventListener('DOMContentLoaded', () => {
           chip.textContent = titleCase(current.modality);
           chip.title = 'Click to remove';
           chip.addEventListener('click', async () => {
-            delete userFilters[fc.columnName];
+            delete userFilters[fc.columnName]; // remove modality-only selection
             await fetchAndRender('remove_popover_modality_chip');
           });
           chips.appendChild(chip);
         }
         (current.values || []).forEach((v) => {
-          if (savedValuesSet.has(String(v)) || quick.has(String(v))) return; // avoid duplicates
+          // Avoid duplicates with saved values or quick chip list
+          if (savedValuesSet.has(String(v)) || quick.has(String(v))) return;
           const chip = document.createElement('button');
           chip.className = 'btn btn-sm btn-secondary';
           const label = current.modality && !['exact', 'is'].includes(modalityLower) ? `${titleCase(current.modality)}: ${v}` : String(v);
@@ -262,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       group.appendChild(chips);
 
-      // More button opens popover for advanced filtering
+      // Show advanced popover editor for the column
       const moreBtn = document.createElement('button');
       moreBtn.className = 'btn btn-sm btn-outline-primary mt-2';
       moreBtn.textContent = 'More';
@@ -276,6 +283,9 @@ document.addEventListener('DOMContentLoaded', () => {
       filterPanel.appendChild(group);
     });
   }
+
+  // Helper used by filter panel to present nicer labels
+  const titleCase = (s) => String(s || '').replace(/\b\w/g, (c) => c.toUpperCase());
 
   // Build the filter popover dynamically based on filterType
   // - FREETEXT: modality (contains/exact/starts/empty) + text field when relevant

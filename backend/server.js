@@ -93,16 +93,18 @@ app.post('/api/page-data', async (req, res) => {
     }
 
     function buildEmptyNotEmpty(column) {
-      const ident = `\`${column}\``;
+      const ident = `\`${column}\``; // wrap column name in backticks to handle reserved words/special chars
       return {
-        // Consider NULL or empty-string as "Empty" consistently across types (non-date)
+        // Treat NULL or empty string as "Empty" for non-date types
         empty: `(${ident} IS NULL OR CAST(${ident} AS STRING) = '')`,
+        // Not Empty: anything that is not NULL and not empty string
         notEmpty: `(NOT (${ident} IS NULL OR CAST(${ident} AS STRING) = ''))`
       };
     }
 
     // Normalize modality to a lowercase string (supports array form in saved filters)
     function normalizeModality(mod) {
+      // Saved filters may send modality as string or array of strings (take first)
       if (Array.isArray(mod) && mod.length > 0) return String(mod[0]).toLowerCase();
       if (typeof mod === 'string') return mod.toLowerCase();
       return '';
@@ -112,10 +114,10 @@ app.post('/api/page-data', async (req, res) => {
     // - Supports LIST/BOOLEAN/NUMERIC/DATE/TIMESTAMP/FREETEXT
     // - Adds explicit empty/not-empty handling for non-date types via modality
     function buildPredicateFromDef(column, def) {
-      const ident = `\`${column}\``;
-      const type = (def.type || '').toUpperCase();
-      const modality = normalizeModality(def.modality);
-      const values = Array.isArray(def.values) ? def.values : [];
+      const ident = `\`${column}\``; // quoted column identifier
+      const type = (def.type || '').toUpperCase(); // normalize type
+      const modality = normalizeModality(def.modality); // normalize modality
+      const values = Array.isArray(def.values) ? def.values : []; // guard against non-array
 
       // Empty/Not Empty via modality for non-date types
       if (!['DATE', 'DATETIME', 'TIMESTAMP'].includes(type)) {
@@ -172,10 +174,10 @@ app.post('/api/page-data', async (req, res) => {
     // Build predicate for a user-applied filter (chips or popover)
     // - Mirrors saved filter behavior but also supports common relative DATE tokens
     function buildPredicateFromUser(column, userDef, fieldType) {
-      const type = (userDef.type || fieldType || '').toUpperCase();
-      const values = Array.isArray(userDef.values) ? userDef.values : [];
-      const ident = `\`${column}\``;
-      const modality = normalizeModality(userDef.modality);
+      const type = (userDef.type || fieldType || '').toUpperCase(); // prefer explicit type, else from schema
+      const values = Array.isArray(userDef.values) ? userDef.values : []; // ensure array
+      const ident = `\`${column}\``; // quoted column identifier
+      const modality = normalizeModality(userDef.modality); // normalize modality
 
       // Unified Empty/Not Empty handling when user selects a designated token
       if (values.length === 1 && (values[0] === 'Empty' || values[0] === 'Not Empty')) {
@@ -236,7 +238,7 @@ app.post('/api/page-data', async (req, res) => {
       return null;
     }
 
-    // Evaluate saved + user filters against known columns only
+    // Aggregate WHERE clauses and compose SELECT and COUNT queries
     const whereClauses = [];
     const fieldTypeByName = new Map(fields.map((f) => [f.name, (f.type || '').toUpperCase()]));
 
@@ -262,13 +264,12 @@ app.post('/api/page-data', async (req, res) => {
       if (pred) whereClauses.push(pred);
     }
 
-    // 4) Query data + count with WHERE and LIMIT/OFFSET
-    const qualified = `\`${bigquery.projectId}.${cfg.datasetId}.${cfg.tableId}\``;
-    const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const qualified = `\`${bigquery.projectId}.${cfg.datasetId}.${cfg.tableId}\``; // fully-qualified table name
+    const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : ''; // join conditions
 
-    const limit = Math.max(1, Math.min(1000, pagination.pageSize || 10));
-    const offset = Math.max(0, ((pagination.page || 1) - 1) * limit);
-    const query = `SELECT * FROM ${qualified} ${whereSql} LIMIT ${limit} OFFSET ${offset}`;
+    const limit = Math.max(1, Math.min(1000, pagination.pageSize || 10)); // clamp page size 1..1000
+    const offset = Math.max(0, ((pagination.page || 1) - 1) * limit); // calculate offset
+    const query = `SELECT * FROM ${qualified} ${whereSql} LIMIT ${limit} OFFSET ${offset}`; // data query
     // eslint-disable-next-line no-console
     console.log('[QUERY] data', query);
 
